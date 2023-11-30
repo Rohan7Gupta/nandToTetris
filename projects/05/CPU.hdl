@@ -1,0 +1,118 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/05/CPU.hdl
+
+/**
+ * The Hack CPU (Central Processing unit), consisting of an ALU,
+ * two registers named A and D, and a program counter named PC.
+ * The CPU is designed to fetch and execute instructions written in 
+ * the Hack machine language. In particular, functions as follows:
+ * Executes the inputted instruction according to the Hack machine 
+ * language specification. The D and A in the language specification
+ * refer to CPU-resident registers, while M refers to the external
+ * memory location addressed by A, i.e. to Memory[A]. The inM input 
+ * holds the value of this location. If the current instruction needs 
+ * to write a value to M, the value is placed in outM, the address 
+ * of the target location is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM==0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time step. If reset==1 then the 
+ * CPU jumps to address 0 (i.e. pc is set to 0 in next time step) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+    // Put your code here:
+
+    //control A MUX --> inst[15]=0
+    Mux16(a=instruction, b=outALU, sel=instruction[15] , out=inA);//mux instruction or alu o/p
+    
+    //control A --> (not inst[15] ) or (INST[15] AND inst[5])  = 1
+    Not(in=instruction[15], out=notOut1);
+    And(a=instruction[15], b=instruction[5], out=andOut1);
+    Or(a=notOut1, b=andOut1, out=controlA);
+    
+    ARegister(in=inA, load=controlA , out[0..14]=addressM, out=outAreg);//A reg 
+
+    //control ALU MUX  inst[12]=a=0 and inst[15]=1(c type) --> A, a=1 --> M
+    And(a=instruction[12], b=instruction[15], out=andOut2);
+    Mux16(a=outAreg, b=inM, sel=andOut2 , out=inALU);
+    
+    //load D reg when inst[4]=1 and inst[15]=1 i.e c type
+    And(a=instruction[15], b=instruction[4], out=andOut3);
+    DRegister(in=outALU, load=andOut3, out=outD);
+    
+    //ALU
+    ALU(x=outD, y=inALU, zx=instruction[11], nx=instruction[10], zy=instruction[9], ny=instruction[8], f=instruction[7], no=instruction[6], out=outM, out=outALU, zr=zr, ng=ng);
+    
+    //writeM =1 if d0=inst[3]=1 and inst[15]=1 i.e. c type
+    And(a=instruction[3], b=instruction[15], out=andOut4);
+    Mux(a=false, b=true, sel=andOut4, out=writeM);
+    
+
+    //PC controlled by jjj or instruction[2..0] & instruction[15]=1
+    And(a=instruction[0], b=instruction[15], out=out0);
+    And(a=instruction[1], b=instruction[15], out=out1);
+    And(a=instruction[2], b=instruction[15], out=out2);
+    DMux8Way(in=true, sel[0]=out0, sel[1]=out1, sel[2]=out2, a=nul, b=jgt, c=jeq, d=jge, e=jlt, f=jne, g=jle, h=jmp);
+    
+    Not(in=zr, out=notzr);
+    Not(in=ng, out=notng);
+    And(a=notzr, b=notng, out=zr0ng0);
+    Or(a=zr, b=notng, out=zr1orng0);
+    And(a=notzr, b=ng, out=zr0ng1);
+    Or(a=zr, b=ng, out=zr1orng1);
+    
+
+    DMux(in=nul, sel=false, a=inc0, b=loadA0);
+    DMux(in=jgt, sel=zr0ng0, a=inc1, b=loadA1);
+    DMux(in=jeq, sel=zr, a=inc2, b=loadA2);
+    DMux(in=jge, sel=zr1orng0, a=inc3, b=loadA3);
+    DMux(in=jlt, sel=zr0ng1, a=inc4, b=loadA4);
+    DMux(in=jne, sel=notzr, a=inc5, b=loadA5);
+    DMux(in=jle, sel=zr1orng1, a=inc6, b=loadA6);
+    DMux(in=jmp, sel=true, a=inc7, b=loadA7);
+    
+    //mux incPC
+    Mux(a=inc0, b=inc1, sel=out0, out=outinc1);
+    Mux(a=inc2, b=inc3, sel=out0, out=outinc2);
+    Mux(a=inc4, b=inc5, sel=out0, out=outinc3);
+    Mux(a=inc6, b=inc7, sel=out0, out=outinc4);
+
+    Mux(a=outinc1, b=outinc2, sel=out1, out=outinc5);
+    Mux(a=outinc3, b=outinc4, sel=out1, out=outinc6);
+
+    Mux(a=outinc5, b=outinc6, sel=out2, out=incPC);
+    
+    //mux loadA
+    Mux(a=loadA0, b=loadA1, sel=out0, out=outloadA1);
+    Mux(a=loadA2, b=loadA3, sel=out0, out=outloadA2);
+    Mux(a=loadA4, b=loadA5, sel=out0, out=outloadA3);
+    Mux(a=loadA6, b=loadA7, sel=out0, out=outloadA4);
+
+    Mux(a=outloadA1, b=outloadA2, sel=out1, out=outloadA5);
+    Mux(a=outloadA3, b=outloadA4, sel=out1, out=outloadA6);
+
+    Mux(a=outloadA5, b=outloadA6, sel=out2, out=loadA);
+
+    //PC
+    PC(in=outAreg, load=loadA, inc=incPC, reset=reset, out[15]=dump, out[0..14]=pc);
+
+}
